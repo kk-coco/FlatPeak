@@ -16,9 +16,9 @@ This test suite validates the core functionalities of the FlatPeak Connect API, 
 
 1. Clone repository:
 ```bash
-git clone https://github.com/your-repo/flatpeak-connect-test.git
-cd flatpeak-connect-test
+git clone https://github.com/kk-coco/FlatPeak.git
+cd FlatPeak
 2. Install dependencies using command below:
 pip install -r requirements.txt
 3. execute script:
-python test_flatpeak_connect.py
+python dynamic_market_tariff_test.py
