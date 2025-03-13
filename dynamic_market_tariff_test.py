@@ -1,4 +1,4 @@
-import os
+from time import sleep
 import requests
 from datetime import datetime, timedelta
 import base64
@@ -7,8 +7,6 @@ import base64
 def get_bearer_token(account_id, api_key):
     """Step 1: Authenticate and obtain bearer token."""
     url = "https://api.flatpeak.com/login"
-    username = "your_flatpeak_account_id"
-    password = "your_flatpeak_api_key"
     # Combine username and password and Base64 encode them
     auth_value = f"{account_id}:{api_key}"
     encoded_auth_value = base64.b64encode(auth_value.encode('utf-8')).decode('utf-8')
@@ -45,9 +43,9 @@ def simulate_connect_session(connect_token):
     while True:
         response = requests.post(url, headers=headers, json=data)
         # response.raise_for_status()
-        print("request data", data)
+        # print("request data", data)
         response_json = response.json()
-        print('response_json',response_json)
+        # print('response_json',response_json)
         current_route = response_json.get("route")
 
         if current_route == "session_restore":
@@ -103,34 +101,26 @@ def exchange_connect_token(connect_token,bearer_token):
     headers = {"Authorization": f"Bearer {bearer_token}",
                "Content-Type": "application/json"}
     params = {"connect_token": connect_token}
-    response = requests.get(url, headers=headers,params=params)
-    # response.raise_for_status()
+    response = requests.get(url, headers=headers, params=params)
+    response.raise_for_status()
     print(response.text)
     return response.json()['location_id']
 
 
 def get_tariff_rates(location_id, bearer_token):
     """Step 5: Fetch tariff rates for the location."""
-    url = "https://api.flatpeak.com/costs/instant"
-    headers = {"Authorization": f"Bearer {bearer_token}",
-               "Content-Type": "application/json"}
-    start_time = (datetime.utcnow()).replace(hour=0, minute=0, second=0, microsecond=0).isoformat() + "Z"
+    url = f"https://api.flatpeak.com/tariffs/rates/{location_id}"
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+    start_time = (datetime.utcnow()).isoformat() + "Z"
     end_time = (datetime.utcnow() + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0).isoformat() + "Z"
     params = {
-        "location_id": location_id,
         "start_time": start_time,
         "end_time": end_time,
-        "units": "W",
-        "value": 20566,
-        "resolution": "hourly",
-        "session_reference_id": "SESSION1234567890",
-        "record_reference_id": "MET1234567890",
-        "direction": "IMPORT",
-        "tariff_rate": "IMPORT",
-        "measurand": "TRANSFERRED",
-        "confidence": 1
+        "include_tariff": True,
+        "include_carbon": False,
+        "direction": "IMPORT"
     }
-    response = requests.post(url, headers=headers, json=params)
+    response = requests.get(url, headers=headers, params=params)
     print(response.text)
     response.raise_for_status()
     return response.json()
@@ -142,41 +132,45 @@ def main():
     api_key = "sk_live_c83e648de7733aae9ee4c636f5064514"#os.environ.get("FLATPEAK_API_KEY")
 
     # Step 1: Get bearer token
+    print('------------start get_bearer_token------------')
     bearer_token = get_bearer_token(account_id, api_key)
     # Step 2: Create connect token
+    print('------------start create_connect_token------------')
     connect_token = create_connect_token(bearer_token)
     #
     # # Step 3: Simulate Connect session
+    print('------------start simulate_connect_session------------')
     simulate_connect_session(connect_token)
 
     # Step 4: Exchange for location ID
+    print('------------start exchange_connect_token------------')
     location_id = exchange_connect_token(connect_token,bearer_token)
     # Step 5: Get tariff rates
+    print('------------start waiting 30s tariff process------------')
+    sleep(30)
+    print('------------start get_tariff_rates------------')
     rates = get_tariff_rates(location_id, bearer_token)
-
     # Assertions
-    now = datetime.utcnow()
-    # expected_end_time = (now + timedelta(days=1)).replace(
-    #     hour=0, minute=0, second=0, microsecond=0
-    # ).isoformat() + "Z"
     request_end_time = rates['request']['end_time']
-    expected_end_time = rates['data']['end_time']
-    # assert rates['data']['end_time'] == expected_end_time
-    assert request_end_time == expected_end_time,  "request end time should be equal to response end time"
-
-    current_time = (datetime.utcnow()).replace(hour=0, minute=0, second=0, microsecond=0).isoformat() + "Z"
-    assert current_time == rates['data']['start_time'], "Start time should be current time"
-    #
-    assert rates['currency_code'] == 'GBP', "Currency must be GBP"
-
-    start = datetime.fromisoformat(rates['data']['start_time'].replace('Z', ''))
-    end = datetime.fromisoformat(rates['data']['end_time'].replace('Z', ''))
-    expected_hours = int((end - start).total_seconds() // 3600)
-    assert len(rates['data']) == expected_hours, "Incorrect number of hourly rates"
-
-    for entry in rates['request']:
-        print(entry['confidence'])
-        assert entry['confidence'] == 1, "All rates must have confidence 1"
-
+    expected_end_time = rates['data'][-1]['valid_to']
+    # 1. assert End time matches request
+    assert request_end_time == expected_end_time,  f"End time mismatch. Expected {expected_end_time}, Got {request_end_time}"
+    # 2. assert Start time is the current time
+    current_time = (datetime.utcnow()).replace(microsecond=0).isoformat() + "Z"
+    assert current_time == rates['request']['start_time'], f"Start time not equal to current time, Expected ~{current_time}, Got {rates['request']['start_time']}"
+    # 3. assert currency_code
+    assert rates['currency_code'] == 'GBP', f"wrong currency code. Expected GBP, Got {rates['currency_code']}"
+    #  Hourly rates validation
+    if len(rates['data']) <= 0:
+        return "Data array is empty."
+    for entry in rates['data']:
+        valid_from = datetime.fromisoformat(entry["valid_from"].replace("Z", "+00:00"))
+        valid_to = datetime.fromisoformat(entry["valid_to"].replace("Z", "+00:00"))
+        confidence = entry["tariff"]["confidence"]
+        # 4. check hourly rate
+        assert (valid_to.hour == (valid_from + timedelta(hours=1)).hour) or (valid_to.hour == 0), f"Hourly rate validation failed: valid_to ({valid_to}) should be later than valid_from ({valid_from})."
+        # 5. check confidence is 1
+        assert confidence == 1, f"Confidence check failed: Expected 1, but got {confidence}."
+    print("End time matches request,Start time is the current time,Currency code is GBP,Data array has valid hourly rates and confidence is 1.")
 if __name__ == "__main__":
     main()
