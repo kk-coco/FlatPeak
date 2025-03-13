@@ -1,3 +1,4 @@
+import os
 from time import sleep
 import requests
 from datetime import datetime, timedelta
@@ -128,8 +129,8 @@ def get_tariff_rates(location_id, bearer_token):
 
 def main():
     # Retrieve credentials from environment variables
-    account_id = "acc_672a0c0c9986827a8308670b"#os.environ.get("FLATPEAK_ACCOUNT_ID")
-    api_key = "sk_live_c83e648de7733aae9ee4c636f5064514"#os.environ.get("FLATPEAK_API_KEY")
+    account_id = os.environ.get("FLATPEAK_ACCOUNT_ID")
+    api_key = os.environ.get("FLATPEAK_API_KEY")
 
     # Step 1: Get bearer token
     print('------------start get_bearer_token------------')
